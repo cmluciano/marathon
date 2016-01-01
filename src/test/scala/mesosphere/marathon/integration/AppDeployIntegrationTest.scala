@@ -9,7 +9,7 @@ import mesosphere.marathon.Protos.HealthCheckDefinition.Protocol
 import mesosphere.marathon.api.v2.json.{ V2AppDefinition, V2AppUpdate }
 import mesosphere.marathon.health.HealthCheck
 import mesosphere.marathon.integration.setup._
-import mesosphere.marathon.state.{ AppDefinition, Command, PathId }
+import mesosphere.marathon.state._
 import org.scalatest.{ BeforeAndAfter, GivenWhenThen, Matchers }
 import org.slf4j.LoggerFactory
 import play.api.libs.json.JsArray
@@ -29,6 +29,33 @@ class AppDeployIntegrationTest
 
   //clean up state before running the test case
   before(cleanUp())
+
+  test("deploy a simple Docker app") {
+    Given("a new Docker app")
+    val app = V2AppDefinition(
+      AppDefinition(
+        id = testBasePath / "dockerapp",
+        cmd = Some("sleep 50000"),
+        container = Some(
+          Container(docker = Some(mesosphere.marathon.state.Container.Docker(
+            image = "busybox"
+          )))
+        ),
+        cpus = 0.2,
+        mem = 256.0,
+        instances = 1
+      )
+    )
+
+    When("The app is deployed")
+    val result = marathon.createAppV2(app)
+
+    Then("The app is created")
+    result.code should be (201) // Created
+    extractDeploymentIds(result) should have size 1
+    waitForEvent("deployment_success")
+    waitForTasks(app.id, 1) // The app has really started
+  }
 
   test("create a simple app without health checks") {
     Given("a new app")

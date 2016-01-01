@@ -46,6 +46,7 @@ CLEANUP_TARGET_DIRS="${CLEANUP_TARGET_DIRS-true}"
 CLEANUP_CONTAINERS_ON_EXIT="${CLEANUP_CONTAINERS_ON_EXIT-true}"
 export MARATHON_MAX_TASKS_PER_OFFER="${MARATHON_MAX_TASKS_PER_OFFER-1}"
 NO_DOCKER_CACHE="${NO_DOCKER_CACHE-true}"
+MOUNT_DOCKER_SOCKET="${MOUNT_DOCKER_SOCKET-true}"
 
 cat <<HERE
 BUILD_ID $BUILD_ID
@@ -67,8 +68,9 @@ Directories:
     TARGET_DIRS      = "$TARGET_DIRS"
                        (the directory containing your build results)
 
-Docker caching:
+Docker:
 
+    MOUNT_DOCKER_SOCKET = "$MOUNT_DOCKER_SOCKET": true or false default: true
     NO_DOCKER_CACHE = "$NO_DOCKER_CACHE" allowed: true or false default: true
                        (whether to use the docker cache when building the base image)
 
@@ -109,25 +111,32 @@ if [ "$CLEANUP_CONTAINERS_ON_EXIT" = "true" ]; then
     trap cleanup EXIT
 fi
 
+DOCKER_VERSION=`docker --version | sed -e 's/^.* version \([0-9.]*\).*$/\1/g'`
 if ! docker build --rm=$NO_DOCKER_CACHE --no-cache=$NO_DOCKER_CACHE -t marathon-buildbase:$BUILD_ID \
-    -f "$PROJECT_DIR/Dockerfile.build-base" "$PROJECT_DIR"; then
+    --build-arg DOCKER_VERSION=$DOCKER_VERSION -f "$PROJECT_DIR/Dockerfile.development" "$PROJECT_DIR"; then
     fatal "Build for the buildbase failed" >&2
 fi
 
-docker run \
-    --rm=$CLEANUP_CONTAINERS_ON_EXIT \
-    --name marathon-itests-$BUILD_ID \
-    --memory 4g \
-    --memory-swap 6g \
-    -e MARATHON_MAX_TASKS_PER_OFFER=$MARATHON_MAX_TASKS_PER_OFFER \
-    -v "$SBT_DIR:/root/.sbt" \
-    -v "$IVY2_DIR:/root/.ivy2" \
-    -v "$TARGET_DIRS/main:/marathon/target" \
-    -v "$TARGET_DIRS/project:/marathon/project/target" \
-    -v "$TARGET_DIRS/mesos-simulation:/marathon/mesos-simulation/target" \
-    -i \
-    marathon-buildbase:$BUILD_ID \
-    bash -c '
-    sbt -Dsbt.log.format=false test integration:test &&\
-    sbt -Dsbt.log.format=false "project mesos-simulation" integration:test "test:runMain mesosphere.mesos.scale.DisplayAppScalingResults"' \
-    || fatal "build/tests failed"
+docker_args=(
+    run
+    --rm=$CLEANUP_CONTAINERS_ON_EXIT
+    --name marathon-itests-$BUILD_ID
+    --memory 4g
+    --memory-swap 6g
+    -e MARATHON_MAX_TASKS_PER_OFFER=$MARATHON_MAX_TASKS_PER_OFFER
+    -v "$SBT_DIR:/root/.sbt"
+    -v "$IVY2_DIR:/root/.ivy2"
+    -v "$TARGET_DIRS/main:/marathon/target"
+    -v "$TARGET_DIRS/project:/marathon/project/target"
+    -v "$TARGET_DIRS/mesos-simulation:/marathon/mesos-simulation/target"
+)
+
+if [ "$MOUNT_DOCKER_SOCKET" = "true" ]; then
+    docker_args+=(-v /var/run/docker.sock:/var/run/docker.sock)
+fi
+
+docker_args+=(-i "marathon-buildbase:$BUILD_ID")
+docker_args+=(bash -c 'sbt -Dsbt.log.format=false test integration:test && sbt -Dsbt.log.format=false "project mesos-simulation" integration:test "test:runMain mesosphere.mesos.scale.DisplayAppScalingResults"')
+
+echo "Running docker ${docker_args[@]}"
+docker "${docker_args[@]}" || fatal "build/tests failed"
