@@ -3,13 +3,10 @@ package mesosphere.marathon.state
 import java.util.concurrent.atomic.AtomicInteger
 import javax.validation.ConstraintViolationException
 
-import akka.actor.ActorSystem
 import akka.event.EventStream
-import akka.testkit.TestKit
 import mesosphere.marathon.io.storage.StorageProvider
 import mesosphere.marathon.state.PathId._
 import mesosphere.marathon.test.MarathonActorSupport
-import mesosphere.marathon.tasks.TaskTrackerImpl
 import mesosphere.marathon.{ MarathonConf, MarathonSchedulerService, MarathonSpec, PortRangeExhaustedException }
 import mesosphere.util.SerializeExecution
 import org.mockito.Matchers.any

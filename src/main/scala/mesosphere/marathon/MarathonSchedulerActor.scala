@@ -9,10 +9,11 @@ import mesosphere.marathon.MarathonSchedulerActor.ScaleApp
 import mesosphere.marathon.api.LeaderInfo
 import mesosphere.marathon.api.v2.json.V2AppUpdate
 import mesosphere.marathon.core.launchqueue.LaunchQueue
+import mesosphere.marathon.core.task.tracker.TaskTracker
 import mesosphere.marathon.event.{ AppTerminatedEvent, DeploymentFailed, DeploymentSuccess, LocalLeadershipEvent }
 import mesosphere.marathon.health.HealthCheckManager
 import mesosphere.marathon.state._
-import mesosphere.marathon.tasks.{ TaskReconciler, TaskTracker }
+import TaskTracker.App
 import mesosphere.marathon.upgrade.DeploymentManager._
 import mesosphere.marathon.upgrade.{ DeploymentManager, DeploymentPlan, TaskKillActor }
 import mesosphere.mesos.protos
@@ -21,6 +22,7 @@ import org.apache.mesos.SchedulerDriver
 import org.slf4j.LoggerFactory
 
 import scala.collection.JavaConverters._
+import scala.collection.Map
 import scala.collection.immutable.Seq
 import scala.concurrent.duration._
 import scala.concurrent.{ ExecutionContext, Future, Promise }
@@ -387,7 +389,7 @@ class SchedulerActions(
     appRepository: AppRepository,
     groupRepository: GroupRepository,
     healthCheckManager: HealthCheckManager,
-    taskReconciler: TaskReconciler,
+    taskReconciler: TaskTracker,
     taskQueue: LaunchQueue,
     eventBus: EventStream,
     val schedulerActor: ActorRef,
@@ -414,7 +416,6 @@ class SchedulerActions(
       driver.killTask(protos.TaskID(task.getId))
     }
     taskQueue.purge(app.id)
-    taskReconciler.removeUnknownAppAndItsTasks(app.id)
     taskQueue.resetDelay(app)
     // TODO after all tasks have been killed we should remove the app from taskTracker
 
@@ -449,16 +450,16 @@ class SchedulerActions(
           }
         }
 
-        for (unknownAppId <- taskReconciler.list.keySet -- appIds) {
+        val appList: Map[PathId, App] = taskReconciler.list
+        for (unknownAppId <- appList.keySet -- appIds) {
           log.warn(
             s"App $unknownAppId exists in TaskTracker, but not App store. " +
               "The app was likely terminated. Will now expunge."
           )
-          for (orphanTask <- taskReconciler.getTasks(unknownAppId)) {
+          for (orphanTask <- appList.get(unknownAppId).map(_.tasks).getOrElse(Iterable.empty)) {
             log.info(s"Killing task ${orphanTask.getId}")
             driver.killTask(protos.TaskID(orphanTask.getId))
           }
-          taskReconciler.removeUnknownAppAndItsTasks(unknownAppId)
         }
 
         log.info("Requesting task reconciliation with the Mesos master")

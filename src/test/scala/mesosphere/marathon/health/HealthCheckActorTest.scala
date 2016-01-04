@@ -2,10 +2,12 @@ package mesosphere.marathon.health
 
 import akka.actor.{ ActorSystem, Props }
 import akka.testkit._
+import mesosphere.marathon.core.task.tracker.TaskTracker
 import mesosphere.marathon.health.HealthCheckActorTest.SameThreadExecutionContext
 import mesosphere.marathon.state.PathId._
-import mesosphere.marathon.state.{ AppDefinition, AppRepository, Timestamp }
-import mesosphere.marathon.tasks.TaskTracker
+import mesosphere.marathon.state.AppDefinition
+import mesosphere.marathon.state.AppRepository
+import mesosphere.marathon.state.Timestamp
 import mesosphere.marathon.test.MarathonActorSupport
 import mesosphere.marathon.{ MarathonScheduler, MarathonSchedulerDriverHolder, MarathonSpec, Protos }
 import org.apache.mesos.Protos.TaskID
