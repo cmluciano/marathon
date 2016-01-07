@@ -13,7 +13,7 @@ import mesosphere.marathon.io.PathFun
 import mesosphere.marathon.io.storage.StorageProvider
 import mesosphere.marathon.upgrade._
 import mesosphere.marathon.{ MarathonConf, MarathonSchedulerService, ModuleNames, PortRangeExhaustedException }
-import mesosphere.util.SerializeExecution
+import mesosphere.util.CapConcurrentExecutions
 import scala.concurrent.ExecutionContext.Implicits.global
 import org.slf4j.LoggerFactory
 
@@ -30,7 +30,7 @@ import mesosphere.marathon.api.v2.json.V2Group._
   * It persists the state of a group and initiates deployments.
   */
 class GroupManager @Singleton @Inject() (
-    @Named(ModuleNames.SERIALIZE_GROUP_UPDATES) serializeUpdates: SerializeExecution,
+    @Named(ModuleNames.SERIALIZE_GROUP_UPDATES) serializeUpdates: CapConcurrentExecutions,
     scheduler: MarathonSchedulerService,
     groupRepo: GroupRepository,
     appRepo: AppRepository,
