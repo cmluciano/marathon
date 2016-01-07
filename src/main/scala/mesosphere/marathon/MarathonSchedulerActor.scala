@@ -389,7 +389,7 @@ class SchedulerActions(
     appRepository: AppRepository,
     groupRepository: GroupRepository,
     healthCheckManager: HealthCheckManager,
-    taskReconciler: TaskTracker,
+    taskTracker: TaskTracker,
     taskQueue: LaunchQueue,
     eventBus: EventStream,
     val schedulerActor: ActorRef,
@@ -409,7 +409,7 @@ class SchedulerActions(
     healthCheckManager.removeAllFor(app.id)
 
     log.info(s"Stopping app ${app.id}")
-    val tasks = taskReconciler.getTasks(app.id)
+    val tasks = taskTracker.getTasks(app.id)
 
     for (task <- tasks) {
       log.info(s"Killing task ${task.getId}")
@@ -443,14 +443,14 @@ class SchedulerActions(
         log.info("Syncing tasks for all apps")
 
         val knownTaskStatuses = appIds.flatMap { appId =>
-          taskReconciler.getTasks(appId).collect {
+          taskTracker.getTasks(appId).collect {
             case task: Protos.MarathonTask if task.hasStatus => task.getStatus
             case task: Protos.MarathonTask => // staged tasks, which have no status yet
               taskStatus(task)
           }
         }
 
-        val appList: Map[PathId, App] = taskReconciler.list
+        val appList: Map[PathId, App] = taskTracker.list
         for (unknownAppId <- appList.keySet -- appIds) {
           log.warn(
             s"App $unknownAppId exists in TaskTracker, but not App store. " +
@@ -508,7 +508,7 @@ class SchedulerActions(
     * Make sure the app is running the correct number of instances
     */
   def scale(driver: SchedulerDriver, app: AppDefinition): Unit = {
-    val currentCount = taskReconciler.count(app.id)
+    val currentCount = taskTracker.count(app.id)
     val targetCount = app.instances
 
     if (targetCount > currentCount) {
@@ -529,7 +529,7 @@ class SchedulerActions(
       log.info(s"Scaling ${app.id} from $currentCount down to $targetCount instances")
       taskQueue.purge(app.id)
 
-      val toKill = taskReconciler.getTasks(app.id).take(currentCount - targetCount)
+      val toKill = taskTracker.getTasks(app.id).take(currentCount - targetCount)
       log.info(s"Killing tasks: ${toKill.map(_.getId)}")
       for (task <- toKill) {
         driver.killTask(protos.TaskID(task.getId))
