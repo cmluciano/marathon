@@ -5,10 +5,11 @@ import mesosphere.marathon.Protos.MarathonTask
 import mesosphere.marathon.state.PathId
 import org.apache.mesos.Protos.TaskStatus
 
+import scala.concurrent.duration.Deadline
 import scala.concurrent.{ ExecutionContext, Future }
 
 private[tracker] object TaskOpProcessor {
-  case class Operation(sender: ActorRef, appId: PathId, taskId: String, action: Action)
+  case class Operation(deadline: Deadline, sender: ActorRef, appId: PathId, taskId: String, action: Action)
 
   sealed trait Action
 

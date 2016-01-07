@@ -32,7 +32,8 @@ private[tracker] class TaskCreatorAndUpdaterDelegate(conf: TaskTrackerConfig, ta
   private[this] def taskUpdate(appId: PathId, taskId: String, action: TaskOpProcessor.Action): Future[Unit] = {
     import akka.pattern.ask
     implicit val timeout: Timeout = conf.taskUpdateRequestTimeout().milliseconds
-    (taskTrackerRef ? TaskTrackerActor.ForwardTaskOp(appId, taskId, action)).mapTo[Unit].recover {
+    val deadline = Deadline.now + timeout.duration
+    (taskTrackerRef ? TaskTrackerActor.ForwardTaskOp(deadline, appId, taskId, action)).mapTo[Unit].recover {
       case NonFatal(e) =>
         throw new RuntimeException(s"while asking for $action on app [$appId] and task [$taskId]", e)
     }
