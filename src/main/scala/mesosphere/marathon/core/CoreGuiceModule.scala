@@ -1,5 +1,8 @@
 package mesosphere.marathon.core
 
+import javax.inject.Named
+
+import akka.actor.ActorRefFactory
 import com.google.inject.{ AbstractModule, Provides, Scopes, Singleton }
 import mesosphere.marathon.core.appinfo.{ AppInfoModule, AppInfoService }
 import mesosphere.marathon.core.base.Clock
@@ -10,19 +13,11 @@ import mesosphere.marathon.core.plugin.PluginManager
 import mesosphere.marathon.core.task.bus.{ TaskStatusEmitter, TaskStatusObservables }
 import mesosphere.marathon.core.task.jobs.TaskJobsModule
 import mesosphere.marathon.core.task.tracker.{ TaskCreator, TaskTracker, TaskUpdater }
-import mesosphere.marathon.core.task.update.impl.TaskStatusUpdateProcessorImpl
-import mesosphere.marathon.core.task.update.impl.steps.{
-  ContinueOnErrorStep,
-  NotifyHealthCheckManagerStepImpl,
-  NotifyLaunchQueueStepImpl,
-  NotifyRateLimiterStepImpl,
-  PostToEventStreamStepImpl,
-  ScaleAppUpdateStepImpl,
-  TaskStatusEmitterPublishStepImpl,
-  UpdateTaskTrackerStepImpl
-}
+import mesosphere.marathon.core.task.update.impl.steps.{ ContinueOnErrorStep, NotifyHealthCheckManagerStepImpl, NotifyLaunchQueueStepImpl, NotifyRateLimiterStepImpl, PostToEventStreamStepImpl, ScaleAppUpdateStepImpl, TaskStatusEmitterPublishStepImpl, UpdateTaskTrackerStepImpl }
+import mesosphere.marathon.core.task.update.impl.{ TaskStatusUpdateProcessorImpl, ThrottlingTaskStatusUpdateProcessor }
 import mesosphere.marathon.core.task.update.{ TaskStatusUpdateProcessor, TaskStatusUpdateStep }
 import mesosphere.marathon.plugin.auth.{ Authenticator, Authorizer }
+import mesosphere.util.RestrictParallelExecutions
 
 /**
   * Provides the glue between guice and the core modules.
@@ -117,9 +112,15 @@ class CoreGuiceModule extends AbstractModule {
 
     // FIXME: Because of cycle breaking in guice, it is hard to not wire it with Guice directly
     bind(classOf[TaskStatusUpdateProcessor])
-      .to(classOf[TaskStatusUpdateProcessorImpl])
-      .asEagerSingleton()
+      .annotatedWith(ThrottlingTaskStatusUpdateProcessor.named)
+      .to(classOf[TaskStatusUpdateProcessorImpl]).asEagerSingleton()
+    bind(classOf[TaskStatusUpdateProcessor]).to(classOf[ThrottlingTaskStatusUpdateProcessor]).asEagerSingleton()
 
     bind(classOf[AppInfoModule]).asEagerSingleton()
+  }
+
+  @Provides @Singleton @Named(ThrottlingTaskStatusUpdateProcessor.name)
+  def throttlingTaskStatusUpdateProcessorSerializer(actorRefFactory: ActorRefFactory): RestrictParallelExecutions = {
+    RestrictParallelExecutions(actorRefFactory, "serializeTaskStatusUpdates", 10)
   }
 }

@@ -1,6 +1,7 @@
 package mesosphere.marathon.core.task.tracker
 
 import akka.actor.ActorRef
+import com.codahale.metrics.MetricRegistry
 import mesosphere.marathon.core.leadership.LeadershipModule
 import mesosphere.marathon.core.task.tracker.impl._
 import mesosphere.marathon.metrics.Metrics
@@ -15,13 +16,15 @@ class TaskTrackerModule(
     config: TaskTrackerConfig,
     leadershipModule: LeadershipModule,
     taskRepository: TaskRepository) {
-  lazy val taskTracker: TaskTracker = new TaskTrackerDelegate(config, taskTrackerActorRef)
+  lazy val taskTracker: TaskTracker = new TaskTrackerDelegate(metrics, config, taskTrackerActorRef)
 
   def taskUpdater: TaskUpdater = taskTrackerCreatorAndUpdater
   def taskCreator: TaskCreator = taskTrackerCreatorAndUpdater
 
   private[this] def statusUpdateResolver(taskTrackerRef: ActorRef): TaskOpProcessorImpl.StatusUpdateActionResolver =
-    new TaskOpProcessorImpl.StatusUpdateActionResolver(new TaskTrackerDelegate(config, taskTrackerRef))
+    new TaskOpProcessorImpl.StatusUpdateActionResolver(
+      new TaskTrackerDelegate(new Metrics(new MetricRegistry), config, taskTrackerRef)
+    )
   private[this] def taskOpProcessor(taskTrackerRef: ActorRef): TaskOpProcessor =
     new TaskOpProcessorImpl(taskTrackerRef, taskRepository, statusUpdateResolver(taskTrackerRef))
   private[this] lazy val taskUpdaterActorMetrics = new TaskUpdateActor.ActorMetrics(metrics)
