@@ -65,7 +65,7 @@ object ProcessKeeper {
       "MESOS_CONTAINERIZERS" -> "docker,mesos")
     startProcess(
       "mesos",
-      Process(Seq("mesos-local", "--ip=127.0.0.1"), cwd = None, mesosEnv:_*),
+      Process(Seq("mesos-local", "--ip=127.0.0.1"), cwd = None, mesosEnv: _*),
       upWhen = _.toLowerCase.contains("registered with master"))
   }
 

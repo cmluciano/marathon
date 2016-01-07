@@ -57,6 +57,22 @@ class AppDeployIntegrationTest
     waitForTasks(app.id, 1) // The app has really started
   }
 
+  test("create a simple docker app with http health checks") {
+    Given("a new app")
+    val app = v2AppProxy(testBasePath / "docker-http-app", "v1", instances = 1, withHealth = false, docker = true).
+      copy(healthChecks = Set(healthCheck))
+    val check = appProxyCheck(app.id, "v1", true)
+
+    When("The app is deployed")
+    val result = marathon.createAppV2(app)
+
+    Then("The app is created")
+    result.code should be (201) //Created
+    extractDeploymentIds(result) should have size 1
+    waitForEvent("deployment_success")
+    check.pingSince(5.seconds) should be (true) //make sure, the app has really started
+  }
+
   test("create a simple app without health checks") {
     Given("a new app")
     val app = v2AppProxy(testBasePath / "app", "v1", instances = 1, withHealth = false)

@@ -123,7 +123,12 @@ docker_args=(
     --name marathon-itests-$BUILD_ID
     --memory 4g
     --memory-swap 6g
-    -e MARATHON_MAX_TASKS_PER_OFFER=$MARATHON_MAX_TASKS_PER_OFFER
+    -e "BUILD_ID=$BUILD_ID"
+    -e "IVY2_DIR=$IVY2_DIR"
+    -e "PROJECT_DIRS=$PROJECT_DIRS"
+    -e "SBT_DIR=$SBT_DIR"
+    -e "TARGET_DIRS=$TARGET_DIRS"
+    -e "MARATHON_MAX_TASKS_PER_OFFER=$MARATHON_MAX_TASKS_PER_OFFER"
     -v "$SBT_DIR:/root/.sbt"
     -v "$IVY2_DIR:/root/.ivy2"
     -v "$TARGET_DIRS/main:/marathon/target"

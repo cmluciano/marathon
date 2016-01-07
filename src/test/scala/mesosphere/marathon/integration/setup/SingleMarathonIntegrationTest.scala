@@ -4,8 +4,9 @@ import java.io.File
 
 import mesosphere.marathon.api.v2.json.V2AppDefinition
 import mesosphere.marathon.health.HealthCheck
-import mesosphere.marathon.state.{ AppDefinition, PathId }
+import mesosphere.marathon.state.{ AppDefinition, Container, PathId }
 import org.apache.commons.io.FileUtils
+import org.apache.mesos.Protos
 import org.apache.zookeeper.{ WatchedEvent, Watcher, ZooKeeper }
 import org.scalatest.{ BeforeAndAfterAllConfigMap, ConfigMap, Suite }
 import org.slf4j.LoggerFactory
@@ -161,14 +162,44 @@ trait SingleMarathonIntegrationTest
     file.getAbsolutePath
   }
 
-  def v2AppProxy(appId: PathId, versionId: String, instances: Int, withHealth: Boolean = true, dependencies: Set[PathId] = Set.empty): V2AppDefinition =
-    V2AppDefinition(appProxy(appId, versionId, instances, withHealth, dependencies))
+  def v2AppProxy(appId: PathId, versionId: String, instances: Int, withHealth: Boolean = true, dependencies: Set[PathId] = Set.empty, docker: Boolean = false): V2AppDefinition =
+    V2AppDefinition(appProxy(appId, versionId, instances, withHealth, dependencies, docker))
 
-  private[this] def appProxy(appId: PathId, versionId: String, instances: Int, withHealth: Boolean, dependencies: Set[PathId]): AppDefinition = {
+  private[this] def appProxy(appId: PathId, versionId: String, instances: Int, withHealth: Boolean, dependencies: Set[PathId], docker: Boolean): AppDefinition = {
     val mainInvocation = appProxyMainInvocation
-    val exec = Some(s"""echo APP PROXY $$MESOS_TASK_ID RUNNING; $mainInvocation $appId $versionId http://localhost:${config.httpPort}/health$appId/$versionId""")
     val health = if (withHealth) Set(HealthCheck(gracePeriod = 20.second, interval = 1.second, maxConsecutiveFailures = 10)) else Set.empty[HealthCheck]
-    AppDefinition(appId, exec, executor = "//cmd", instances = instances, cpus = 0.5, mem = 128.0, healthChecks = health, dependencies = dependencies)
+
+    if (docker) {
+      val targetDirs = sys.env.getOrElse("TARGET_DIRS", "foo") // FIXME (gkleiman): what's a sane default?
+      val cmd = Some(s"""bash -c 'echo APP PROXY $$MESOS_TASK_ID RUNNING; $appProxyMainInvocationImpl $appId $versionId http://$$HOST:${config.httpPort}/health$appId/$versionId'""")
+      AppDefinition(
+        id = appId,
+        cmd = cmd,
+        container = Some(
+          new Container(
+            docker = Some(new mesosphere.marathon.state.Container.Docker(
+              image = s"""marathon-itests-${sys.env.getOrElse("BUILD_ID", "test")}"""
+            )),
+            volumes = collection.immutable.Seq(
+              new Container.Volume(hostPath = env.getOrElse("IVY2_DIR", "/root/.ivy2"), containerPath = "/root/.ivy2", mode = Protos.Volume.Mode.RO),
+              new Container.Volume(hostPath = env.getOrElse("SBT_DIR", "/root/.sbt"), containerPath = "/root/.sbt", mode = Protos.Volume.Mode.RO),
+              new Container.Volume(hostPath = env.getOrElse("SBT_DIR", "/root/.sbt"), containerPath = "/root/.sbt", mode = Protos.Volume.Mode.RO),
+              new Container.Volume(hostPath = s"""$targetDirs/main""", containerPath = "/marathon/target", mode = Protos.Volume.Mode.RO),
+              new Container.Volume(hostPath = s"""$targetDirs/project""", containerPath = "/marathon/project/target", mode = Protos.Volume.Mode.RO)
+            )
+          )
+        ),
+        instances = instances,
+        cpus = 0.5,
+        mem = 128.0,
+        healthChecks = health,
+        dependencies = dependencies
+      )
+    }
+    else {
+      val cmd = Some(s"""echo APP PROXY $$MESOS_TASK_ID RUNNING; $mainInvocation $appId $versionId http://localhost:${config.httpPort}/health$appId/$versionId""")
+      AppDefinition(id = appId, cmd = cmd, executor = "//cmd", instances = instances, cpus = 0.5, mem = 128.0, healthChecks = health, dependencies = dependencies)
+    }
   }
 
   def appProxyCheck(appId: PathId, versionId: String, state: Boolean): IntegrationHealthCheck = {
