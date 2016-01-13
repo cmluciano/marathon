@@ -1,5 +1,6 @@
 package mesosphere.util
 
+import akka.actor.Terminated
 import com.codahale.metrics.MetricRegistry
 import mesosphere.marathon.MarathonSpec
 import mesosphere.marathon.integration.setup.WaitTestSupport
@@ -64,7 +65,7 @@ class CapConcurrentExecutionsTest extends MarathonActorSupport with MarathonSpec
 
   test("concurrent executions are serialized if maxParallel has been reached") {
     val metrics = capMetrics
-    val serialize = CapConcurrentExecutions(metrics, system, "serialize1", maxParallel = 2, maxQueued = 10)
+    val serialize = CapConcurrentExecutions(metrics, system, "serialize4", maxParallel = 2, maxQueued = 10)
     def submitPromise(): (Promise[Unit], Future[Unit]) = {
       val promise = Promise[Unit]()
       val result = serialize.apply(promise.future)
@@ -114,6 +115,49 @@ class CapConcurrentExecutionsTest extends MarathonActorSupport with MarathonSpec
     finally {
       serialize.close()
     }
+  }
 
+  test("queued executions are failed on stop, results of already executing futures are left untouched") {
+    val metrics = capMetrics
+    val serialize = CapConcurrentExecutions(metrics, system, "serialize5", maxParallel = 2, maxQueued = 10)
+    def submitPromise(): (Promise[Unit], Future[Unit]) = {
+      val promise = Promise[Unit]()
+      val result = serialize.apply(promise.future)
+      (promise, result)
+    }
+
+    try {
+      When("three promises are submitted but do not finish")
+      val (promise1, result1) = submitPromise()
+      val (promise2, result2) = submitPromise()
+      val (promise3, result3) = submitPromise()
+
+      Then("we have two promises executing and one queued")
+      WaitTestSupport.waitUntil("messages have been processed", 1.second)(metrics.queued.getValue == 1)
+
+      metrics.processing.getValue should be (2)
+      metrics.queued.getValue should be (1)
+
+      When("the actor finishes now")
+      watch(serialize.serializeExecutionActorRef)
+      serialize.close()
+      expectMsgClass(classOf[Terminated]).getActor should equal(serialize.serializeExecutionActorRef)
+
+      Then("the queued futures is failed immediately")
+      result3.failed.futureValue.getClass should be(classOf[IllegalStateException])
+
+      And("the executing futures normally terminated")
+      result1.isCompleted should be(false)
+      result2.isCompleted should be(false)
+
+      promise1.success(())
+      promise2.success(())
+
+      result1.futureValue should be(())
+      result2.futureValue should be(())
+    }
+    finally {
+      serialize.close()
+    }
   }
 }

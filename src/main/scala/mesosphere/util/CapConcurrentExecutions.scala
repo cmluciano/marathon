@@ -57,10 +57,15 @@ class CapConcurrentExecutions private (
     maxQueued: Int) {
   import CapConcurrentExecutions.log
 
-  private[this] val serializeExecutionActorProps =
-    RestrictParallelExecutionsActor.props(metrics, maxParallel = maxParallel, maxQueued = maxQueued)
-  private[this] val serializeExecutionActorRef = actorRefFactory.actorOf(serializeExecutionActorProps, actorName)
+  private[util] val serializeExecutionActorRef = {
+    val serializeExecutionActorProps =
+      RestrictParallelExecutionsActor.props(metrics, maxParallel = maxParallel, maxQueued = maxQueued)
+    actorRefFactory.actorOf(serializeExecutionActorProps, actorName)
+  }
 
+  /**
+    * Submit the given block to execution.
+    */
   def apply[T](block: => Future[T]): Future[T] = {
     PromiseActor.askWithoutTimeout(
       actorRefFactory, serializeExecutionActorRef, RestrictParallelExecutionsActor.Execute(() => block))
@@ -81,7 +86,7 @@ class CapConcurrentExecutions private (
 private[util] class RestrictParallelExecutionsActor(
     metrics: CapConcurrentExecutionsMetrics, maxParallel: Int, maxQueued: Int) extends Actor {
 
-  import RestrictParallelExecutionsActor.{ log, Execute, Queued }
+  import RestrictParallelExecutionsActor.{ Execute, Queued }
 
   private[this] var active: Int = 0
   private[this] var queue: Queue[Queued] = Queue.empty
@@ -91,13 +96,16 @@ private[util] class RestrictParallelExecutionsActor(
 
     metrics.reset()
 
-    for (execute <- queue) {
-      execute.sender ! Status.Failure(new IllegalStateException(s"$self actor stopped"))
-    }
   }
 
   override def postStop(): Unit = {
     metrics.reset()
+
+    for (execute <- queue) {
+      execute.sender ! Status.Failure(new IllegalStateException(s"$self actor stopped"))
+    }
+
+    queue = Queue.empty
 
     super.postStop()
   }
