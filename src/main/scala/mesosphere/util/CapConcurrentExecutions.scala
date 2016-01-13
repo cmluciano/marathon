@@ -3,16 +3,15 @@ package mesosphere.util
 import javax.annotation.PreDestroy
 
 import akka.actor._
-import akka.pattern.pipe
 import mesosphere.marathon.metrics.Metrics.AtomicIntGauge
 import mesosphere.marathon.metrics.{ MetricPrefixes, Metrics }
 import mesosphere.util.RestrictParallelExecutionsActor.Finished
 import org.slf4j.LoggerFactory
 
 import scala.collection.immutable.Queue
-import scala.concurrent.Future
-import scala.util.Failure
+import scala.concurrent.{ Future, Promise }
 import scala.util.control.NonFatal
+import scala.util.{ Failure, Try }
 
 /**
   * Allows capping parallel executions of methods which return `scala.concurrent.Future`s.
@@ -67,8 +66,9 @@ class CapConcurrentExecutions private (
     * Submit the given block to execution.
     */
   def apply[T](block: => Future[T]): Future[T] = {
-    PromiseActor.askWithoutTimeout(
-      actorRefFactory, serializeExecutionActorRef, RestrictParallelExecutionsActor.Execute(() => block))
+    val promise = Promise[T]()
+    serializeExecutionActorRef ! RestrictParallelExecutionsActor.Execute(promise, () => block)
+    promise.future
   }
 
   @PreDestroy
@@ -86,10 +86,10 @@ class CapConcurrentExecutions private (
 private[util] class RestrictParallelExecutionsActor(
     metrics: CapConcurrentExecutionsMetrics, maxParallel: Int, maxQueued: Int) extends Actor {
 
-  import RestrictParallelExecutionsActor.{ Execute, Queued }
+  import RestrictParallelExecutionsActor.Execute
 
   private[this] var active: Int = 0
-  private[this] var queue: Queue[Queued] = Queue.empty
+  private[this] var queue: Queue[Execute[_]] = Queue.empty
 
   override def preStart(): Unit = {
     super.preStart()
@@ -102,7 +102,7 @@ private[util] class RestrictParallelExecutionsActor(
     metrics.reset()
 
     for (execute <- queue) {
-      execute.sender ! Status.Failure(new IllegalStateException(s"$self actor stopped"))
+      execute.complete(Failure(new IllegalStateException(s"$self actor stopped")))
     }
 
     queue = Queue.empty
@@ -111,13 +111,12 @@ private[util] class RestrictParallelExecutionsActor(
   }
 
   override def receive: Receive = {
-    case Execute(func) =>
-
+    case exec: Execute[_] =>
       if (active >= maxParallel && queue.size >= maxQueued) {
         sender ! Status.Failure(new IllegalStateException(s"$self queue may not exceed $maxQueued entries"))
       }
       else {
-        queue :+= Queued(sender(), func)
+        queue :+= exec
         startNextIfPossible()
       }
 
@@ -141,15 +140,15 @@ private[util] class RestrictParallelExecutionsActor(
         queue = newQueue
         active += 1
 
-        import context.dispatcher
-        import akka.pattern.pipe
-        val future: Future[Any] =
+        val future: Future[_] =
           try metrics.processingTimer.timeFuture(next.func())
           catch { case NonFatal(e) => Future.failed(e) }
-        future.pipeTo(next.sender)
 
         val myself = self
-        future.onComplete(_ => myself ! Finished)(CallerThreadExecutionContext.callerThreadExecutionContext)
+        future.onComplete { (result: Try[_]) =>
+          next.complete(result)
+          myself ! Finished
+        }(CallerThreadExecutionContext.callerThreadExecutionContext)
     }
   }
 }
@@ -159,7 +158,8 @@ private[util] object RestrictParallelExecutionsActor {
     Props(new RestrictParallelExecutionsActor(metrics, maxParallel = maxParallel, maxQueued = maxQueued))
 
   private val log = LoggerFactory.getLogger(getClass.getName)
-  case class Execute[T](func: () => Future[T])
-  private case class Queued(sender: ActorRef, func: () => Future[_])
+  case class Execute[T](promise: Promise[T], func: () => Future[T]) {
+    def complete(result: Try[_]): Unit = promise.complete(result.asInstanceOf[Try[T]])
+  }
   private case object Finished
 }
