@@ -8,7 +8,7 @@ import javax.ws.rs.core.{ Context, Response }
 
 import com.codahale.metrics.annotation.Timed
 import mesosphere.marathon.api.v2.json.Formats._
-import mesosphere.marathon.api.v2.json.{ V2AppDefinition, V2Group, V2GroupUpdate }
+import mesosphere.marathon.api.v2.json.GroupUpdate
 import mesosphere.marathon.api.{ AuthResource, MarathonMediaType }
 import mesosphere.marathon.plugin.auth._
 import mesosphere.marathon.state.PathId._
@@ -61,13 +61,13 @@ class GroupsResource @Inject() (
         }
       }
       id match {
-        case ListApps(gid)              => groupResponse(gid.toRootPath, _.transitiveApps.map(V2AppDefinition(_)))
-        case ListRootApps()             => groupResponse(PathId.empty, _.transitiveApps.map(V2AppDefinition(_)))
+        case ListApps(gid)              => groupResponse(gid.toRootPath, _.transitiveApps)
+        case ListRootApps()             => groupResponse(PathId.empty, _.transitiveApps)
         case ListVersionsRE(gid)        => ok(jsonString(result(groupManager.versions(gid.toRootPath))))
         case ListRootVersionRE()        => ok(jsonString(result(groupManager.versions(PathId.empty))))
-        case GetVersionRE(gid, version) => groupResponse(gid.toRootPath, V2Group(_), version = Some(Timestamp(version)))
-        case GetRootVersionRE(version)  => groupResponse(PathId.empty, V2Group(_), version = Some(Timestamp(version)))
-        case _                          => groupResponse(id.toRootPath, V2Group(_))
+        case GetVersionRE(gid, version) => groupResponse(gid.toRootPath, { g => g }, version = Some(Timestamp(version)))
+        case GetRootVersionRE(version)  => groupResponse(PathId.empty, { g => g }, version = Some(Timestamp(version)))
+        case _                          => groupResponse(id.toRootPath, { g => g })
       }
     }
   }
@@ -100,7 +100,7 @@ class GroupsResource @Inject() (
                      body: Array[Byte],
                      @Context req: HttpServletRequest, @Context resp: HttpServletResponse): Response = {
     doIfAuthorized(req, resp, CreateAppOrGroup, id.toRootPath) { implicit identity =>
-      withValid(Json.parse(body).as[V2GroupUpdate]) { update =>
+      withValid(Json.parse(body).as[GroupUpdate]) { update =>
         val effectivePath = update.id.map(_.canonicalPath(id.toRootPath)).getOrElse(id.toRootPath)
         val current = result(groupManager.rootGroup()).findGroup(_.id == effectivePath)
         if (current.isDefined)
@@ -136,12 +136,12 @@ class GroupsResource @Inject() (
              body: Array[Byte],
              @Context req: HttpServletRequest, @Context resp: HttpServletResponse): Response = {
     doIfAuthorized(req, resp, UpdateAppOrGroup, id.toRootPath) { implicit identity =>
-      withValid(Json.parse(body).as[V2GroupUpdate]) { update =>
+      withValid(Json.parse(body).as[GroupUpdate]) { update =>
         if (dryRun) {
           val planFuture = groupManager.group(id.toRootPath).map { maybeOldGroup =>
             val oldGroup = maybeOldGroup.getOrElse(Group.empty)
             Json.obj(
-              "steps" -> DeploymentPlan(oldGroup, update.apply(V2Group(oldGroup), Timestamp.now()).toGroup()).steps
+              "steps" -> DeploymentPlan(oldGroup, update.apply(oldGroup, Timestamp.now())).steps
             )
           }
 
@@ -193,7 +193,7 @@ class GroupsResource @Inject() (
     }
   }
 
-  private def updateOrCreate(id: PathId, update: V2GroupUpdate, force: Boolean): (DeploymentPlan, PathId, Timestamp) = {
+  private def updateOrCreate(id: PathId, update: GroupUpdate, force: Boolean): (DeploymentPlan, PathId, Timestamp) = {
     val version = Timestamp.now()
     def groupChange(group: Group): Group = {
       val versionChange = update.version.map { updateVersion =>
@@ -205,7 +205,7 @@ class GroupsResource @Inject() (
       val scaleChange = update.scaleBy.map { scale =>
         group.updateApps(version) { app => app.copy(instances = (app.instances * scale).ceil.toInt) }
       }
-      versionChange orElse scaleChange getOrElse update.apply(V2Group(group), version).toGroup()
+      versionChange orElse scaleChange getOrElse update.apply(group, version)
     }
 
     val effectivePath = update.id.map(_.canonicalPath(id)).getOrElse(id)
