@@ -178,7 +178,8 @@ trait SingleMarathonIntegrationTest
         container = Some(
           new Container(
             docker = Some(new mesosphere.marathon.state.Container.Docker(
-              image = s"""marathon-itests-${sys.env.getOrElse("BUILD_ID", "test")}"""
+              image = s"""marathon-buildbase:${sys.env.getOrElse("BUILD_ID", "test")}""",
+              network = Some(Protos.ContainerInfo.DockerInfo.Network.HOST)
             )),
             volumes = collection.immutable.Seq(
               new Container.Volume(hostPath = env.getOrElse("IVY2_DIR", "/root/.ivy2"), containerPath = "/root/.ivy2", mode = Protos.Volume.Mode.RO),

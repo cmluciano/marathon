@@ -141,7 +141,7 @@ if [ "$MOUNT_DOCKER_SOCKET" = "true" ]; then
 fi
 
 docker_args+=(-i "marathon-buildbase:$BUILD_ID")
-docker_args+=(bash -c 'sbt -Dsbt.log.format=false test integration:test && sbt -Dsbt.log.format=false "project mesos-simulation" integration:test "test:runMain mesosphere.mesos.scale.DisplayAppScalingResults"')
+docker_args+=(bash -c 'sbt -Dsbt.log.format=false "integration:testOnly mesosphere.marathon.integration.AppDeployIntegrationTest"')
 
 echo "Running docker ${docker_args[@]}"
 docker "${docker_args[@]}" || fatal "build/tests failed"
